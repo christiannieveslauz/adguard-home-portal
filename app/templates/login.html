@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}{{ t('login') }} · {{ site_title }}{% endblock %}
+{% block body %}
+<div class="center">
+  <div class="login">
+    <div class="brand">{{ shield }}<span>AdGuard Home <b>Portal</b></span></div>
+    <div class="card"><div class="card-b">
+      {% if error %}<div class="err">{{ error }}</div>{% endif %}
+      {% if oidc %}
+        <a class="btn" style="display:block;text-align:center;text-decoration:none;padding:11px" href="{{ url_for('login_oidc', next=next) }}">{{ t('login_with', name=oidc_name) }}</a>
+      {% endif %}
+      {% if oidc and pw %}<div class="sep">{{ t('or_password') }}</div>{% endif %}
+      {% if pw %}
+      <form method="post">
+        <input type="hidden" name="next" value="{{ next }}">
+        <label for="u">{{ t('username') }}</label><input class="form-control" id="u" name="username" autocomplete="username" required {% if not oidc %}autofocus{% endif %}>
+        <label for="p">{{ t('password') }}</label><input class="form-control" id="p" name="password" type="password" autocomplete="current-password" required>
+        <button class="btn" type="submit">{{ t('login') }}</button>
+      </form>
+      {% endif %}
+      {% if not pw and not oidc %}<div class="err">{{ t('no_auth') }}</div>{% endif %}
+    </div></div>
+    <div class="foot">{{ t('tagline') }} · {% include "_lang.html" %}<br><a href="https://zigma.com.uy" target="_blank" rel="noopener" style="color:var(--mute)">Zigma</a></div>
+  </div>
+</div>
+{% endblock %}

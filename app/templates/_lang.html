@@ -1,0 +1,1 @@
+<span class="lang">{% for code in ('es', 'en') %}{% if not loop.first %} · {% endif %}{% if get_lang() == code %}<b>{{ code|upper }}</b>{% else %}<a href="{{ url_for('set_lang', code=code, next=request.full_path) }}">{{ code|upper }}</a>{% endif %}{% endfor %}</span>

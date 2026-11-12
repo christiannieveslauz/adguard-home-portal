@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block body %}
+<nav class="topbar"><div class="in">
+  <div class="brand">{{ shield }}<span>AdGuard Home <b>Portal</b></span></div>
+  <div class="navlinks"><a href="#consulta">{{ t('nav_check') }}</a><a href="#registro">{{ t('nav_log') }}</a><a href="#excepciones">{{ t('nav_exc') }}</a></div>
+  <div class="user">{% include "_lang.html" %} <span>{{ user }}</span>
+    <form method="post" action="{{ url_for('logout') }}" style="margin:0"><button class="btn ghost sm">{{ t('logout') }}</button></form>
+  </div>
+</div></nav>
+<div class="wrap">
+  <div class="page-title">{{ t('page_title') }}</div>
+  <div class="page-sub">{{ t('page_sub') }}</div>
+
+  <div class="grid two">
+    <section class="card" id="consulta">
+      <div class="card-h"><h2>{{ t('check_title') }}</h2></div>
+      <div class="card-b">
+      <form class="search" id="f">
+        <input id="q" placeholder="{{ t('check_ph') }}" value="{{ query }}" autocomplete="off" spellcheck="false">
+        <button class="btn" id="go">{{ t('check_btn') }}</button>
+      </form>
+      <div class="result" id="res">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div class="dom" id="r-dom"></div><span class="pill" id="r-pill"></span>
+        </div>
+        <div class="muted" id="r-text" style="margin-top:6px"></div>
+        <div id="r-rules"></div>
+        <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap" id="r-actions"></div>
+      </div>
+      </div>
+    </section>
+
+    <section class="card" id="excepciones">
+      <div class="card-h"><h2>{{ t('exc_title') }}</h2></div>
+      <div class="card-b small muted" id="exc">{{ t('loading') }}</div>
+    </section>
+  </div>
+
+  <section class="card" id="registro" style="margin-top:24px">
+    <div class="card-h"><h2>{{ t('log_title') }}</h2></div>
+    <div class="card-b">
+    <div class="toolbar">
+      <select id="client"><option value="">{{ t('all_devices') }}</option></select>
+      <input id="filter" placeholder="{{ t('filter_ph') }}" style="flex:1;min-width:160px">
+      <button class="btn ghost sm" id="reload">{{ t('refresh') }}</button>
+      <span class="muted small" id="count"></span>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>{{ t('col_domain') }}</th><th>{{ t('col_device') }}</th><th>{{ t('col_list') }}</th><th>{{ t('col_count') }}</th><th>{{ t('col_last') }}</th><th></th></tr></thead>
+        <tbody id="rows"><tr><td colspan="6" class="muted">{{ t('loading') }}</td></tr></tbody>
+      </table>
+    </div>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const CSRF = document.querySelector('meta[name=csrf]').content;
+const L = {{ js_strings()|tojson }};
+const tt = (k, o={}) => (L[k]||k).replace(/\{(\w+)\}/g, (_,x)=>o[x]??'');
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),3200)}
+async function api(path, body){
+  const r = await fetch(path, body ? {method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF},body:JSON.stringify(body)} : {});
+  const j = await r.json().catch(()=>({error:'HTTP '+r.status}));
+  if(!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+const ago = iso => { if(!iso) return ''; const s=(Date.now()-new Date(iso))/1000;
+  if(s<60) return tt('js_ago_s',{n:Math.max(1,Math.round(s))}); if(s<3600) return tt('js_ago_m',{n:Math.round(s/60)});
+  if(s<86400) return tt('js_ago_h',{n:Math.round(s/3600)}); return new Date(iso).toLocaleString(document.documentElement.lang); };
+
+function showResult(r){
+  $('#res').classList.add('show');
+  $('#r-dom').textContent = r.domain;
+  const p=$('#r-pill'); p.className='pill '+r.state; p.textContent=tt('st_'+r.state);
+  $('#r-text').textContent = r.text + (r.service ? ' '+tt('js_service')+' '+r.service : '');
+  $('#r-rules').innerHTML = r.rules.map(x=>`<div class="rule">${esc(x.text)} <span class="muted">· ${esc(x.list)}</span></div>`).join('');
+  const a=$('#r-actions'); a.innerHTML='';
+  if(r.state==='bloqueado' && !r.exception){
+    const b=document.createElement('button'); b.className='btn ok'; b.textContent=tt('js_unblock');
+    b.onclick=()=>unblock(r.domain,b); a.appendChild(b);
+    const n=document.createElement('div'); n.className='muted small'; n.style.alignSelf='center';
+    n.textContent=tt('js_unblock_note',{rule:'@@||'+r.domain+'^$important'}); a.appendChild(n);
+  }
+  if(r.exception && !r.removable){
+    const n=document.createElement('div'); n.className='muted small'; n.textContent=tt('js_manual'); a.appendChild(n);
+  }
+  if(r.removable){
+    const b=document.createElement('button'); b.className='btn bad sm'; b.textContent=tt('js_remove');
+    b.onclick=()=>reblock(r.domain,b); a.appendChild(b);
+  }
+}
+async function doCheck(d){
+  if(!d) return; $('#go').disabled=true;
+  try{ showResult(await api('/api/check?d='+encodeURIComponent(d))); history.replaceState(null,'','?d='+encodeURIComponent(d)); }
+  catch(e){ toast(e.message) } finally{ $('#go').disabled=false }
+}
+async function unblock(d,b){
+  if(!confirm(tt('js_confirm_unblock',{d}))) return;
+  b.disabled=true;
+  try{ const j=await api('/api/unblock',{domain:d}); toast(j.added?tt('js_added'):tt('js_exists'));
+       setTimeout(()=>doCheck(d),4000); loadExc(); }
+  catch(e){ toast(e.message); b.disabled=false }
+}
+async function reblock(d,b){
+  if(!confirm(tt('js_confirm_remove',{d}))) return;
+  b.disabled=true;
+  try{ await api('/api/reblock',{domain:d}); toast(tt('js_removed')); setTimeout(()=>doCheck(d),4000); loadExc(); }
+  catch(e){ toast(e.message); b.disabled=false }
+}
+async function loadExc(){
+  try{ const l=await api('/api/exceptions');
+    $('#exc').innerHTML = l.length ? '<table>'+l.map(x=>`<tr><td class="d"><a href="#" data-d="${esc(x.domain)}">${esc(x.domain)}</a><div class="muted small">${esc(x.who)} · ${esc(x.when)}</div></td></tr>`).join('')+'</table>' : tt('js_no_exc');
+    $('#exc').querySelectorAll('a[data-d]').forEach(a=>a.onclick=e=>{e.preventDefault();$('#q').value=a.dataset.d;doCheck(a.dataset.d)});
+  }catch(e){ $('#exc').textContent=e.message }
+}
+let DATA={items:[],clients:[]};
+function render(){
+  const f=$('#filter').value.trim().toLowerCase();
+  const items=DATA.items.filter(i=>!f||i.domain.includes(f));
+  $('#count').textContent=items.length+' '+tt('js_domains');
+  $('#rows').innerHTML = items.length ? items.map(i=>`<tr class="blocked">
+    <td class="d">${esc(i.domain)}</td>
+    <td>${esc(i.client_name||i.client)}${i.client_name?`<div class="muted small">${esc(i.client)}</div>`:''}</td>
+    <td class="small">${esc(i.list)}<div class="muted" style="font-family:ui-monospace,monospace">${esc(i.rule)}</div></td>
+    <td>${i.count}</td><td class="small muted">${ago(i.last)}</td>
+    <td><button class="btn ghost sm" data-d="${esc(i.domain)}">${tt('js_view')}</button></td></tr>`).join('')
+    : '<tr><td colspan="6" class="muted">'+tt('js_none')+'</td></tr>';
+  $('#rows').querySelectorAll('button[data-d]').forEach(b=>b.onclick=()=>{$('#q').value=b.dataset.d;doCheck(b.dataset.d);window.scrollTo({top:0,behavior:'smooth'})});
+}
+async function loadRecent(){
+  const c=$('#client').value;
+  try{ DATA=await api('/api/recent'+(c?'?client='+encodeURIComponent(c):''));
+    const sel=$('#client'), cur=sel.value;
+    if(!c){ sel.innerHTML='<option value="">{{ t('all_devices') }}</option>'+DATA.clients.map(x=>`<option value="${esc(x.ip)}">${esc(x.name?x.name+' ('+x.ip+')':x.ip)} — ${x.count}</option>`).join(''); sel.value=cur; }
+    render();
+  }catch(e){ $('#rows').innerHTML=`<tr><td colspan="6" class="muted">${esc(e.message)}</td></tr>` }
+}
+$('#f').onsubmit=e=>{e.preventDefault();doCheck($('#q').value.trim())};
+$('#client').onchange=loadRecent; $('#filter').oninput=render; $('#reload').onclick=loadRecent;
+if($('#q').value) doCheck($('#q').value);
+loadExc(); loadRecent();
+</script>
+{% endblock %}

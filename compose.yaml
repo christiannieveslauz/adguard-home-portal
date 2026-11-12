@@ -1,0 +1,20 @@
+services:
+  app:
+    build: ./app
+    container_name: adguard-home-portal
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${APP_PORT:-8090}:8090"
+
+  blockpage:
+    build: ./blockpage
+    container_name: adguard-home-portal-blockpage
+    restart: unless-stopped
+    environment:
+      ADMIN_URL: ${ADMIN_URL}
+    volumes:
+      - ./certs:/certs
+    ports:
+      - "80:80"
+      - "443:443"
